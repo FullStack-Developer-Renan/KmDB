@@ -9,12 +9,10 @@ class UserSerializer(serializers.Serializer):
     is_staff = serializers.BooleanField(required=False)
     is_superuser = serializers.BooleanField(required=False)
 
-class UserDetailSerializer(serializers.Serializer):
+class UserReviewSerializer(serializers.Serializer):
     id = serializers.IntegerField(read_only=True)
-    username = serializers.CharField()
-
-class UserIdSerializer(serializers.Serializer):
-    id = serializers.IntegerField(read_only=True)
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
     
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()

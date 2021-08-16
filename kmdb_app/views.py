@@ -1,91 +1,99 @@
+from django.contrib.auth.models import User
+from django.http.response import HttpResponse
 from rest_framework.response import Response
 from traitlets.traitlets import All
-from kmdb_app.permissions import AdminPermission, AllPermission
-from kmdb_app.models import Movie
-from rest_framework import serializers
-from rest_framework.generics import ListCreateAPIView, RetrieveAPIView, RetrieveUpdateDestroyAPIView
-from .serializers import MovieDetailSerializer, MovieSerializer
+from kmdb_app.permissions import MovieDetailPermission, MovieViewPermission, ReviewViewPermission
+from kmdb_app.models import Movie, Review
+from rest_framework import request, serializers
+from rest_framework.generics import CreateAPIView, ListCreateAPIView, RetrieveAPIView, RetrieveUpdateDestroyAPIView, UpdateAPIView
+from .serializers import MovieDetailSerializer, MovieSerializer, ReviewDetailSerializer, ReviewSerializer
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 from rest_framework.authentication import TokenAuthentication
 from ipdb import set_trace
 
+
 class MovieView(ListCreateAPIView):
 
     authentication_classes = [TokenAuthentication]
-    permission_classes = [AdminPermission]
+    permission_classes = [MovieViewPermission]
     
     queryset = Movie.objects.all()
     serializer_class = MovieSerializer
+    
+    def get(self, request, *args, **kwargs):
 
+        if request.data != {}:
+            movie = Movie.objects.filter(title__contains=request.data['title']).all()
+
+            return Response(MovieSerializer(movie, many=True).data)
+
+        return super().get(request, *args, **kwargs)
   
-class MovieDetailViewWithAuthentication(RetrieveUpdateDestroyAPIView):
+class MovieDetailView(RetrieveUpdateDestroyAPIView):
 
     authentication_classes = [TokenAuthentication]
-    permission_classes = [AllPermission]
+    permission_classes = [MovieDetailPermission]
 
     queryset = Movie.objects.all()
     serializer_class = MovieDetailSerializer 
-
-    def get(self, request, pk):     
-        if request.user.username != '':
-            movie = Movie.objects.filter(id=pk).first()
+    
+    def get_serializer(self, *args, **kwargs):
         
-            serialized = MovieDetailSerializer(movie)
-            return Response(serialized.data)
-
-        movie = Movie.objects.filter(id=pk).first()
-    
-        serialized = MovieSerializer(movie)
-        return Response(serialized.data)
-
-
-
-
-
-    
-
-  
-# from django.db.models import query
-# from rest_framework import serializers, status
-# from rest_framework.views import APIView
-# from rest_framework.generics import GenericAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView
-# from rest_framework.mixins import ListModelMixin, CreateModelMixin, UpdateModelMixin, RetrieveModelMixin, DestroyModelMixin
-# from rest_framework.response import Response
-# from .serializer import CustomerSerializer, AccountSerializer, CustomerNoAccountsSerializer, TransferSerializer
-# from .models import Customer, Account, Transfer
-# import ipdb
-
-# class CustomerView(ListCreateAPIView):
-#     queryset = Customer.objects.all()
-#     serializer_class = CustomerSerializer
-    
-
-# class CustomerDetailView(RetrieveUpdateDestroyAPIView):
-#     queryset = Customer.objects.all()
-#     serializer_class = CustomerSerializer
-
-#     def get_serializer(self, *args, **kwargs):
-#         method = self.request.method
-#         if method == 'PUT' or method == 'PATCH':
-#             serializer_class = CustomerNoAccountsSerializer
-#         else:
-#             serializer_class = self.get_serializer_class()
-#         kwargs.setdefault('context', self.get_serializer_context())
-#         return serializer_class(*args, **kwargs)
-
-# class AccountView(ListCreateAPIView):
-#     queryset = Account.objects.all()
-#     serializer_class = AccountSerializer
+        if self.request.user.username != '':
+            serializer_class = MovieDetailSerializer
  
+        else:
+            serializer_class = MovieSerializer
+            
+        return serializer_class(*args, **kwargs)
 
-# class AccountDetailView(RetrieveUpdateDestroyAPIView):
-#     queryset = Account.objects.all()
-#     serializer_class = AccountSerializer
-    
-#     lookup_field = 'id'
-    
-# class TransferView(ListCreateAPIView):
-#     queryset = Transfer.objects.all()
-#     serializer_class = TransferSerializer
+class ReviewView(ListCreateAPIView, UpdateAPIView):
+
+    authentication_classes = [TokenAuthentication]
+    permission_classes = [ReviewViewPermission]
+
+    queryset = Review.objects.all()
+    serializer_class = ReviewSerializer
+
+    def create(self, request, *args, **kwargs):
+
+        get_object_or_404(Movie, id=kwargs['pk'])
+
+        if Review.objects.filter(critic=request.user, movie=Movie.objects.filter(id=kwargs['pk']).first()).exists():
+            return Response({"detail": "You already made this review."}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        
+        if request.data['stars'] > 10:
+            return Response({"stars": ["Ensure this value is less than or equal to 10."]}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if request.data['stars'] < 1:
+            return Response({"stars": ["Ensure this value is greater than or equal to 1."]}, status=status.HTTP_400_BAD_REQUEST)
+
+        review = Review.objects.create(**request.data, critic=request.user, movie=Movie.objects.filter(id=kwargs['pk']).first())
+        
+        return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
+
+    def get_serializer(self, *args, **kwargs):
+
+        if self.request.user.is_superuser == True and self.request.user.is_staff == True:
+            serializer_class = ReviewDetailSerializer
+
+        elif self.request.user.is_superuser == False and self.request.user.is_staff == True:
+            review =  Review.objects.filter(critic_id=self.request.user.id).all()
+
+            return Response(ReviewDetailSerializer(review, many=True).data)
+
+        return serializer_class(*args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+
+        review = get_object_or_404(Review, movie_id=kwargs['pk'], critic_id=request.user.id)
+        
+        review.stars = request.data['stars']
+        review.review = request.data['review']
+        review.spoilers = request.data['spoilers']
+
+        review.save()
+
+        return Response(ReviewSerializer(review).data)
 
